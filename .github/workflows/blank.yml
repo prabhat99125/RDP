@@ -37,6 +37,46 @@ jobs:
           }
           Write-Host "`r✅ Hệ thống đã sẵn sàng!                    " -ForegroundColor Green
 
+      # VIRTUALIZATION / WINDOWS HYPERVISOR
+      - name: ⚡ BẬT HỖ TRỢ VIRTUALIZATION
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "⚡ KIỂM TRA VÀ KÍCH HOẠT HỖ TRỢ VIRTUALIZATION" -ForegroundColor Yellow
+
+          Write-Host "=== Hypervisor Status ===" -ForegroundColor Cyan
+          Get-ComputerInfo | Select-Object HyperVisorPresent
+
+          Write-Host "=== Hyper-V Requirements ===" -ForegroundColor Cyan
+          systeminfo | findstr /i "Hyper-V Requirements"
+
+          Write-Host "=== Hypervisor Launch Type ===" -ForegroundColor Cyan
+          bcdedit /enum "{current}" | findstr /i "hypervisorlaunchtype"
+
+          Write-Host "=== Enable Hypervisor Platform ===" -ForegroundColor Cyan
+          Enable-WindowsOptionalFeature -Online `
+            -FeatureName HypervisorPlatform `
+            -All `
+            -NoRestart `
+            -ErrorAction SilentlyContinue | Out-Host
+
+          Write-Host "=== Enable Virtual Machine Platform ===" -ForegroundColor Cyan
+          Enable-WindowsOptionalFeature -Online `
+            -FeatureName VirtualMachinePlatform `
+            -All `
+            -NoRestart `
+            -ErrorAction SilentlyContinue | Out-Host
+
+          Write-Host "=== Set Hypervisor Launch Type ===" -ForegroundColor Cyan
+          bcdedit /set hypervisorlaunchtype auto
+
+          Write-Host "=== Final Virtualization Status ===" -ForegroundColor Green
+          Get-ComputerInfo | Select-Object HyperVisorPresent
+
+          Write-Host ""
+          Write-Host "⚠️ BIOS-level virtualization cannot be enabled from GitHub Actions." -ForegroundColor Yellow
+          Write-Host "✅ Existing Hyper-V/hypervisor support will be used when available." -ForegroundColor Green
+
       # BACKUP RESTORE
       - name: 📥 KHÔI PHỤC LATEST BACKUP
         env:
@@ -307,6 +347,29 @@ jobs:
               echo "TAILSCALE_IP=localhost" >> $env:GITHUB_ENV
           }
 
+      # ANDROID EMULATOR ACCELERATION CHECK
+      - name: 🤖 KIỂM TRA ANDROID EMULATOR ACCELERATION
+        shell: pwsh
+        run: |
+          $emulatorPaths = @(
+            "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe",
+            "$env:ANDROID_HOME\emulator\emulator.exe",
+            "$env:ANDROID_SDK_ROOT\emulator\emulator.exe"
+          )
+
+          $emulator = $emulatorPaths |
+            Where-Object { $_ -and (Test-Path $_) } |
+            Select-Object -First 1
+
+          if ($emulator) {
+            Write-Host "🤖 Android Emulator found: $emulator" -ForegroundColor Green
+            Write-Host "⚡ Checking acceleration..." -ForegroundColor Cyan
+            & $emulator -accel-check
+          } else {
+            Write-Host "ℹ️ Android Emulator chưa được cài đặt trên runner." -ForegroundColor Cyan
+            Write-Host "➡️ Virtualization support đã được kiểm tra; emulator package có thể cài sau." -ForegroundColor Yellow
+          }
+
       # HIỂN THỊ GIAO DIỆN ĐẸP
       - name: 🎉 THÔNG TIN KẾT NỐI
         run: |
@@ -440,7 +503,6 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
           compression-level: 6
-          overwrite: true
 
       # DỌN DẸP CHUYÊN NGHIỆP
       - name: 🧹 DỌN DẸP HỆ THỐNG
