@@ -37,98 +37,6 @@ jobs:
           }
           Write-Host "`r✅ Hệ thống đã sẵn sàng!                    " -ForegroundColor Green
 
-      # VIRTUALIZATION / WINDOWS HYPERVISOR
-      - name: ⚡ BẬT HỖ TRỢ VIRTUALIZATION
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "⚡ KIỂM TRA VÀ KÍCH HOẠT HỖ TRỢ VIRTUALIZATION" -ForegroundColor Yellow
-
-          Write-Host "=== Hypervisor Status ===" -ForegroundColor Cyan
-          Get-ComputerInfo | Select-Object HyperVisorPresent
-
-          Write-Host "=== Hyper-V Requirements ===" -ForegroundColor Cyan
-          systeminfo | findstr /i "Hyper-V Requirements"
-
-          Write-Host "=== Hypervisor Launch Type ===" -ForegroundColor Cyan
-          bcdedit /enum "{current}" | findstr /i "hypervisorlaunchtype"
-
-          Write-Host "=== Enable Hypervisor Platform ===" -ForegroundColor Cyan
-          Enable-WindowsOptionalFeature -Online `
-            -FeatureName HypervisorPlatform `
-            -All `
-            -NoRestart `
-            -ErrorAction SilentlyContinue | Out-Host
-
-          Write-Host "=== Enable Virtual Machine Platform ===" -ForegroundColor Cyan
-          Enable-WindowsOptionalFeature -Online `
-            -FeatureName VirtualMachinePlatform `
-            -All `
-            -NoRestart `
-            -ErrorAction SilentlyContinue | Out-Host
-
-          Write-Host "=== Set Hypervisor Launch Type ===" -ForegroundColor Cyan
-          bcdedit /set hypervisorlaunchtype auto
-
-          Write-Host "=== Final Virtualization Status ===" -ForegroundColor Green
-          Get-ComputerInfo | Select-Object HyperVisorPresent
-
-          Write-Host ""
-          Write-Host "⚠️ BIOS-level virtualization cannot be enabled from GitHub Actions." -ForegroundColor Yellow
-          Write-Host "✅ Existing Hyper-V/hypervisor support will be used when available." -ForegroundColor Green
-
-      # BACKUP RESTORE
-      - name: 📥 KHÔI PHỤC LATEST BACKUP
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-          $root = "C:\RDP-BACKUP"
-          $archive = "$env:TEMP\rdp-latest.zip"
-          New-Item -ItemType Directory -Path $root -Force | Out-Null
-          Remove-Item $archive -Force -ErrorAction SilentlyContinue
-
-          Write-Host "📥 Đang tìm latest RDP backup..." -ForegroundColor Yellow
-          try {
-              $headers = @{
-                  Authorization = "Bearer $env:GH_TOKEN"
-                  Accept = "application/vnd.github+json"
-                  "X-GitHub-Api-Version" = "2022-11-28"
-              }
-              $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100"
-              $response = Invoke-RestMethod -Uri $api -Headers $headers -Method Get
-              $artifact = $response.artifacts |
-                  Where-Object { $_.name -eq "rdp-backup" -and $_.expired -eq $false } |
-                  Sort-Object created_at -Descending |
-                  Select-Object -First 1
-
-              if ($artifact) {
-                  Write-Host "✅ Backup found: $($artifact.created_at)" -ForegroundColor Green
-                  Invoke-WebRequest -Uri $artifact.archive_download_url -Headers $headers -OutFile $archive
-                  Expand-Archive -Path $archive -DestinationPath $root -Force
-
-                  foreach ($folder in @("Desktop","Documents","Downloads")) {
-                      $source = Join-Path $root $folder
-                      $target = Join-Path $env:USERPROFILE $folder
-                      New-Item -ItemType Directory -Path $target -Force | Out-Null
-                      if (Test-Path $source) {
-                          Copy-Item "$source\*" $target -Recurse -Force -ErrorAction SilentlyContinue
-                          Write-Host "✅ Restored: $folder" -ForegroundColor Green
-                      }
-                  }
-              } else {
-                  Write-Host "ℹ️ No previous backup found. Starting fresh." -ForegroundColor Cyan
-              }
-          } catch {
-              Write-Host "⚠️ Restore failed: $($_.Exception.Message)" -ForegroundColor Yellow
-              Write-Host "➡️ Continuing with a fresh session." -ForegroundColor Yellow
-          }
-
-          Remove-Item $archive -Force -ErrorAction SilentlyContinue
-          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
-          Write-Host "🎯 Restore step completed." -ForegroundColor Green
-
       # CẤU HÌNH NÂNG CAO
       - name: 🔧 CẤU HÌNH HỆ THỐNG
         run: |
@@ -252,6 +160,84 @@ jobs:
           
           Write-Host "✅ Tài khoản: AISTV-PREMIUM đã sẵn sàng" -ForegroundColor Green
 
+      # RESTORE PERSISTENT RDP DATA
+      - name: 📥 KHÔI PHỤC DỮ LIỆU RDP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $root = "C:\RDP-BACKUP"
+          $archive = "$env:TEMP\rdp-latest.zip"
+          $userHome = "C:\Users\AISTV-PREMIUM"
+          New-Item -ItemType Directory -Path $root -Force | Out-Null
+          Remove-Item $archive -Force -ErrorAction SilentlyContinue
+
+          Write-Host "📥 Đang tìm latest RDP backup..." -ForegroundColor Yellow
+          try {
+              $headers = @{
+                  Authorization = "Bearer $env:GH_TOKEN"
+                  Accept = "application/vnd.github+json"
+                  "X-GitHub-Api-Version" = "2022-11-28"
+              }
+
+              $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/artifacts?per_page=100"
+              $response = Invoke-RestMethod -Uri $api -Headers $headers -Method Get
+
+              $artifact = $response.artifacts |
+                  Where-Object { $_.name -eq "rdp-backup" -and $_.expired -eq $false } |
+                  Sort-Object created_at -Descending |
+                  Select-Object -First 1
+
+              if ($artifact) {
+                  Write-Host "✅ Backup found: $($artifact.created_at)" -ForegroundColor Green
+                  Invoke-WebRequest -Uri $artifact.archive_download_url -Headers $headers -OutFile $archive
+                  Expand-Archive -Path $archive -DestinationPath $root -Force
+
+                  foreach ($folder in @("Desktop","Documents","Downloads")) {
+                      $source = Join-Path $root $folder
+                      $target = Join-Path $userHome $folder
+                      New-Item -ItemType Directory -Path $target -Force | Out-Null
+                      if (Test-Path $source) {
+                          Copy-Item "$source\*" $target -Recurse -Force -ErrorAction SilentlyContinue
+                          Write-Host "✅ Restored: $folder" -ForegroundColor Green
+                      }
+                  }
+
+                  # Restore Chrome data that is portable between runners.
+                  # Cookies/passwords may remain machine/DPAPI protected and
+                  # therefore are NOT guaranteed to restore as logged-in.
+                  $chromeSource = Join-Path $root "Chrome\User Data"
+                  $chromeTarget = Join-Path $userHome "AppData\Local\Google\Chrome\User Data"
+
+                  if (Test-Path $chromeSource) {
+                      New-Item -ItemType Directory -Path $chromeTarget -Force | Out-Null
+                      Copy-Item "$chromeSource\*" $chromeTarget -Recurse -Force -ErrorAction SilentlyContinue
+                      Write-Host "✅ Restored: Chrome profile data" -ForegroundColor Green
+                      Write-Host "⚠️ Chrome login/cookies are not guaranteed to survive on a new runner." -ForegroundColor Yellow
+                  }
+
+                  # Restore common user-level application data, excluding
+                  # Windows-managed credential stores.
+                  $appDataSource = Join-Path $root "AppData\Roaming"
+                  $appDataTarget = Join-Path $userHome "AppData\Roaming"
+                  if (Test-Path $appDataSource) {
+                      New-Item -ItemType Directory -Path $appDataTarget -Force | Out-Null
+                      Copy-Item "$appDataSource\*" $appDataTarget -Recurse -Force -ErrorAction SilentlyContinue
+                      Write-Host "✅ Restored: AppData\Roaming" -ForegroundColor Green
+                  }
+              } else {
+                  Write-Host "ℹ️ No previous backup found. Starting fresh." -ForegroundColor Cyan
+              }
+          } catch {
+              Write-Host "⚠️ Restore failed: $($_.Exception.Message)" -ForegroundColor Yellow
+              Write-Host "➡️ Continuing with a fresh session." -ForegroundColor Yellow
+          }
+
+          Remove-Item $archive -Force -ErrorAction SilentlyContinue
+          Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "🎯 Restore step completed." -ForegroundColor Green
+
       # KIỂM TRA QUYỀN ĐĂNG NHẬP
       - name: 🔍 KIỂM TRA QUYỀN HỆ THỐNG
         run: |
@@ -345,29 +331,6 @@ jobs:
           if (-not $ip -or $ip -notmatch '^\d+\.\d+\.\d+\.\d+$') {
               Write-Host "`r⚠️  Không thể lấy IP, sử dụng localhost" -ForegroundColor Yellow
               echo "TAILSCALE_IP=localhost" >> $env:GITHUB_ENV
-          }
-
-      # ANDROID EMULATOR ACCELERATION CHECK
-      - name: 🤖 KIỂM TRA ANDROID EMULATOR ACCELERATION
-        shell: pwsh
-        run: |
-          $emulatorPaths = @(
-            "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe",
-            "$env:ANDROID_HOME\emulator\emulator.exe",
-            "$env:ANDROID_SDK_ROOT\emulator\emulator.exe"
-          )
-
-          $emulator = $emulatorPaths |
-            Where-Object { $_ -and (Test-Path $_) } |
-            Select-Object -First 1
-
-          if ($emulator) {
-            Write-Host "🤖 Android Emulator found: $emulator" -ForegroundColor Green
-            Write-Host "⚡ Checking acceleration..." -ForegroundColor Cyan
-            & $emulator -accel-check
-          } else {
-            Write-Host "ℹ️ Android Emulator chưa được cài đặt trên runner." -ForegroundColor Cyan
-            Write-Host "➡️ Virtualization support đã được kiểm tra; emulator package có thể cài sau." -ForegroundColor Yellow
           }
 
       # HIỂN THỊ GIAO DIỆN ĐẸP
@@ -491,7 +454,7 @@ jobs:
           Get-Job -Name "SystemMonitor" -ErrorAction SilentlyContinue | Stop-Job -PassThru | Remove-Job -Force
 
       # BACKUP FILES BEFORE CLEANUP
-      - name: 📦 BACKUP RDP FILES
+      - name: 📦 BACKUP FULL RDP USER DATA
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -500,6 +463,8 @@ jobs:
             C:\Users\AISTV-PREMIUM\Desktop\**
             C:\Users\AISTV-PREMIUM\Documents\**
             C:\Users\AISTV-PREMIUM\Downloads\**
+            C:\Users\AISTV-PREMIUM\AppData\Roaming\**
+            C:\Users\AISTV-PREMIUM\AppData\Local\Google\Chrome\User Data\**
           retention-days: 30
           if-no-files-found: ignore
           compression-level: 6
