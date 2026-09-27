@@ -527,6 +527,17 @@ jobs:
           Write-Host "│   3. User: AISTV-PREMIUM | Password: trên          │" -ForegroundColor Yellow
           Write-Host "│   4. Enjoy! 🚀                                    │" -ForegroundColor Yellow
           Write-Host "└───────────────────────────────────────────┘" -ForegroundColor Cyan
+
+          # Ready-to-copy xfreerdp command
+          $xfreerdpCommand = "xfreerdp /v:$($env:TAILSCALE_IP):3389 /u:AISTV-PREMIUM /p:'$matKhau' /cert:ignore /f /dynamic-resolution"
+
+          Write-Host ""
+          Write-Host "============================================================" -ForegroundColor Cyan
+          Write-Host "🚀 xfreerdp READY-TO-COPY COMMAND" -ForegroundColor Cyan
+          Write-Host "============================================================" -ForegroundColor Cyan
+          Write-Host $xfreerdpCommand -ForegroundColor Green
+          Write-Host "============================================================" -ForegroundColor Cyan
+          Write-Host ""
           
           # Lưu thời gian vào biến môi trường
           echo "TOTAL_MINUTES=$totalMinutes" >> $env:GITHUB_ENV
