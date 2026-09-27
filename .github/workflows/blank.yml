@@ -238,6 +238,161 @@ jobs:
           Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
           Write-Host "🎯 Restore step completed." -ForegroundColor Green
 
+      # ANDROID STUDIO + SDK + AVD
+      - name: 🤖 CÀI ĐẶT ANDROID STUDIO VÀ SDK
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          Write-Host ""
+          Write-Host "🤖 ĐANG CÀI ĐẶT ANDROID STUDIO + SDK + VIRTUAL DEVICE" -ForegroundColor Yellow
+
+          $userHome = "C:\Users\AISTV-PREMIUM"
+          $sdkRoot = Join-Path $userHome "AppData\Local\Android\Sdk"
+          $androidUserHome = Join-Path $userHome ".android"
+          $avdHome = Join-Path $androidUserHome "avd"
+
+          New-Item -ItemType Directory -Path $sdkRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $androidUserHome -Force | Out-Null
+          New-Item -ItemType Directory -Path $avdHome -Force | Out-Null
+
+          # Install Android Studio machine-wide.
+          try {
+              $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
+              if ($winget) {
+                  winget install --id Google.AndroidStudio --exact --silent --accept-source-agreements --accept-package-agreements
+              } else {
+                  Write-Host "⚠️ winget not available; Android Studio installation skipped." -ForegroundColor Yellow
+              }
+          } catch {
+              Write-Host "⚠️ Android Studio installation warning: $($_.Exception.Message)" -ForegroundColor Yellow
+          }
+
+          # Download Android command-line tools into the RDP user's SDK directory.
+          $toolsZip = "$env:TEMP\android-cmdline-tools.zip"
+          $toolsExtract = "$env:TEMP\android-cmdline-tools-extract"
+          $toolsDir = Join-Path $sdkRoot "cmdline-tools\latest"
+          $sdkManager = Join-Path $toolsDir "bin\sdkmanager.bat"
+
+          Remove-Item $toolsZip -Force -ErrorAction SilentlyContinue
+          Remove-Item $toolsExtract -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $toolsExtract -Force | Out-Null
+
+          try {
+              Invoke-WebRequest `
+                -Uri "https://dl.google.com/android/repository/commandlinetools-win-14742923_latest.zip" `
+                -OutFile $toolsZip
+
+              Expand-Archive -Path $toolsZip -DestinationPath $toolsExtract -Force
+
+              New-Item -ItemType Directory -Path (Split-Path $toolsDir) -Force | Out-Null
+              Remove-Item $toolsDir -Recurse -Force -ErrorAction SilentlyContinue
+              New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
+
+              Copy-Item "$toolsExtract\cmdline-tools\*" $toolsDir -Recurse -Force
+          } catch {
+              Write-Host "❌ Android command-line tools download failed: $($_.Exception.Message)" -ForegroundColor Red
+              exit 1
+          }
+
+          if (!(Test-Path $sdkManager)) {
+              Write-Host "❌ sdkmanager.bat not found: $sdkManager" -ForegroundColor Red
+              exit 1
+          }
+
+          $env:ANDROID_HOME = $sdkRoot
+          $env:ANDROID_SDK_ROOT = $sdkRoot
+          $env:ANDROID_USER_HOME = $androidUserHome
+          $env:ANDROID_AVD_HOME = $avdHome
+
+          # Persist environment variables for the RDP user.
+          [Environment]::SetEnvironmentVariable("ANDROID_HOME", $sdkRoot, "User")
+          [Environment]::SetEnvironmentVariable("ANDROID_SDK_ROOT", $sdkRoot, "User")
+          [Environment]::SetEnvironmentVariable("ANDROID_USER_HOME", $androidUserHome, "User")
+          [Environment]::SetEnvironmentVariable("ANDROID_AVD_HOME", $avdHome, "User")
+
+          # Add Android tools to this workflow and future RDP sessions.
+          $androidPaths = @(
+              "$sdkRoot\platform-tools",
+              "$sdkRoot\emulator",
+              "$toolsDir\bin"
+          )
+
+          foreach ($path in $androidPaths) {
+              if (!(Test-Path $path)) {
+                  New-Item -ItemType Directory -Path $path -Force | Out-Null
+              }
+              Add-Content $env:GITHUB_PATH $path
+              if ($env:PATH -notlike "*$path*") {
+                  $env:PATH = "$path;$env:PATH"
+              }
+          }
+
+          # Install SDK components needed for Android Studio and an AVD.
+          Write-Host "📦 Installing Android SDK packages..." -ForegroundColor Cyan
+          1..20 | ForEach-Object { "y" } | & $sdkManager --sdk_root="$sdkRoot" --licenses 2>$null
+
+          & $sdkManager --sdk_root="$sdkRoot" `
+              "platform-tools" `
+              "emulator" `
+              "platforms;android-35" `
+              "build-tools;35.0.0" `
+              "system-images;android-35;google_apis;x86_64"
+
+          # Create the virtual device for the RDP user.
+          $avdManager = Join-Path $toolsDir "bin\avdmanager.bat"
+          $avdName = "Pixel_6_API_35"
+
+          if (Test-Path $avdManager) {
+              & $avdManager delete avd -n $avdName 2>$null
+              "no" | & $avdManager create avd `
+                  -n $avdName `
+                  -k "system-images;android-35;google_apis;x86_64" `
+                  -d "pixel_6" `
+                  --force
+          }
+
+          # Check emulator acceleration. This is informational; GitHub-hosted
+          # runners may not expose nested virtualization to the Android emulator.
+          $emulator = Join-Path $sdkRoot "emulator\emulator.exe"
+          if (Test-Path $emulator) {
+              Write-Host ""
+              Write-Host "🔍 Android Emulator acceleration check:" -ForegroundColor Yellow
+              & $emulator -accel-check
+          }
+
+          # Tell Android Studio where the SDK is located.
+          $studioConfig = Join-Path $userHome "AppData\Roaming\Google\AndroidStudio2025.1"
+          New-Item -ItemType Directory -Path $studioConfig -Force | Out-Null
+
+          Write-Host ""
+          Write-Host "✅ Android Studio installation/configuration completed." -ForegroundColor Green
+          Write-Host "📁 SDK: $sdkRoot" -ForegroundColor Cyan
+          Write-Host "📱 AVD: $avdName" -ForegroundColor Cyan
+          Write-Host "⚠️ If Emulator acceleration reports unavailable, the runner does not expose the required virtualization." -ForegroundColor Yellow
+
+          Remove-Item $toolsZip -Force -ErrorAction SilentlyContinue
+          Remove-Item $toolsExtract -Recurse -Force -ErrorAction SilentlyContinue
+
+      # ANDROID BACKUP OF AVD CONFIGURATION
+      - name: 📱 KIỂM TRA ANDROID VIRTUAL DEVICE
+        shell: pwsh
+        run: |
+          $userHome = "C:\Users\AISTV-PREMIUM"
+          $sdkRoot = Join-Path $userHome "AppData\Local\Android\Sdk"
+          $androidUserHome = Join-Path $userHome ".android"
+          $env:ANDROID_HOME = $sdkRoot
+          $env:ANDROID_SDK_ROOT = $sdkRoot
+          $env:ANDROID_USER_HOME = $androidUserHome
+          $env:ANDROID_AVD_HOME = Join-Path $androidUserHome "avd"
+
+          $avdManager = "$sdkRoot\cmdline-tools\latest\bin\avdmanager.bat"
+          if (Test-Path $avdManager) {
+              Write-Host "📱 Available Android Virtual Devices:" -ForegroundColor Cyan
+              & $avdManager list avd
+          } else {
+              Write-Host "⚠️ avdmanager not found." -ForegroundColor Yellow
+          }
+
       # KIỂM TRA QUYỀN ĐĂNG NHẬP
       - name: 🔍 KIỂM TRA QUYỀN HỆ THỐNG
         run: |
@@ -465,6 +620,7 @@ jobs:
             C:\Users\AISTV-PREMIUM\Downloads\**
             C:\Users\AISTV-PREMIUM\AppData\Roaming\**
             C:\Users\AISTV-PREMIUM\AppData\Local\Google\Chrome\User Data\**
+            C:\Users\AISTV-PREMIUM\.android\**
           retention-days: 30
           if-no-files-found: ignore
           compression-level: 6
@@ -472,46 +628,73 @@ jobs:
       # DỌN DẸP CHUYÊN NGHIỆP
       - name: 🧹 DỌN DẸP HỆ THỐNG
         if: always()
+        continue-on-error: true
         run: |
           Write-Host ""
           Write-Host "🧹 ĐANG DỌN DẸP HỆ THỐNG..." -ForegroundColor Yellow
-          
+
           $cleanupSteps = @(
               @{Name="Xóa file password"; Script={
-                  Remove-Item "$env:TEMP\rdp_password.txt" -ErrorAction SilentlyContinue
+                  Remove-Item "$env:TEMP\rdp_password.txt" -Force -ErrorAction SilentlyContinue
               }},
+
               @{Name="Vô hiệu hóa user"; Script={
                   Disable-LocalUser -Name "AISTV-PREMIUM" -ErrorAction SilentlyContinue
               }},
+
               @{Name="Đóng kết nối mạng"; Script={
-                  & "$env:ProgramFiles\Tailscale\tailscale.exe" down --accept-risk=all -ErrorAction SilentlyContinue
+                  $tailscale = "$env:ProgramFiles\Tailscale\tailscale.exe"
+                  if (Test-Path $tailscale) {
+                      & $tailscale down --accept-risk=all 2>$null
+                      if ($LASTEXITCODE -ne 0) {
+                          Write-Host "Tailscale đã ngắt hoặc không còn kết nối." -ForegroundColor Yellow
+                      }
+                  }
                   Start-Sleep -Seconds 5
               }},
+
               @{Name="Xóa rule firewall"; Script={
-                  netsh advfirewall firewall delete rule name="RDP-Premium" dir=in -ErrorAction SilentlyContinue
-                  netsh advfirewall firewall delete rule name="RDP-Premium-Out" dir=out -ErrorAction SilentlyContinue
+                  # netsh does NOT support PowerShell -ErrorAction.
+                  & netsh advfirewall firewall delete rule name="RDP-Premium" dir=in 2>$null
+                  & netsh advfirewall firewall delete rule name="RDP-Premium-Out" dir=out 2>$null
+
                   Remove-NetFirewallRule -DisplayName "RDP-Premium" -ErrorAction SilentlyContinue
                   Remove-NetFirewallRule -DisplayName "RDP-Premium-Out" -ErrorAction SilentlyContinue
               }},
+
               @{Name="Khôi phục cài đặt RDP"; Script={
-                  Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 1 -Force -ErrorAction SilentlyContinue
+                  Set-ItemProperty `
+                      -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+                      -Name "fDenyTSConnections" `
+                      -Value 1 `
+                      -Force `
+                      -ErrorAction SilentlyContinue
+
+                  Set-ItemProperty `
+                      -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+                      -Name "UserAuthentication" `
+                      -Value 1 `
+                      -Force `
+                      -ErrorAction SilentlyContinue
+
                   Stop-Service -Name TermService -Force -ErrorAction SilentlyContinue
               }}
           )
-          
-          foreach($step in $cleanupSteps) {
+
+          foreach ($step in $cleanupSteps) {
               Write-Host "│ 🗑️  $($step.Name)..." -NoNewline -ForegroundColor Gray
               try {
                   & $step.Script
-                  Write-Host "`r│ ✅ $($step.Name)" -ForegroundColor Green
+                  Write-Host "`r│ ✅ $($step.Name)                    " -ForegroundColor Green
               } catch {
                   Write-Host "`r│ ⚠️  $($step.Name) - Đã xử lý an toàn" -ForegroundColor Yellow
               }
               Start-Sleep -Milliseconds 300
           }
-          
-          # Dọn dẹp jobs còn sót
-          Get-Job | Stop-Job -PassThru | Remove-Job -Force -ErrorAction SilentlyContinue
-          
+
+          Get-Job |
+              Stop-Job -PassThru -ErrorAction SilentlyContinue |
+              Remove-Job -Force -ErrorAction SilentlyContinue
+
           Write-Host ""
           Write-Host "🎉 Dọn dẹp hoàn tất! Hẹn gặp lại! 👋" -ForegroundColor Green
