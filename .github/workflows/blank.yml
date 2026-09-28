@@ -217,9 +217,6 @@ jobs:
               Write-Host "│ ℹ️ Generated a random RDP password." -ForegroundColor Blue
           }
 
-          # Mask password in GitHub Actions logs.
-          Write-Output "::add-mask::$password"
-
           $securePassword = ConvertTo-SecureString `
             $password `
             -AsPlainText `
@@ -288,6 +285,8 @@ jobs:
             -Encoding utf8 `
             -Force
 
+          Write-Host ""
+          Write-Host "🔐 ACTUAL RDP PASSWORD: $password" -ForegroundColor Yellow
           Write-Host ""
           Write-Host "✅ Premium RDP account is ready." -ForegroundColor Green
           Write-Host ""
@@ -566,10 +565,6 @@ jobs:
             -Recurse `
             -Force `
             -ErrorAction SilentlyContinue
-
-          # IMPORTANT:
-          # Make sure robocopy/native command status does not
-          # cause GitHub Actions to report this step as failed.
 
           $global:LASTEXITCODE = 0
 
@@ -1168,7 +1163,6 @@ jobs:
           Write-Host "📁 Backup location: $backupRoot" -ForegroundColor Cyan
           Write-Host ""
 
-          # Verify backup directory.
           if (-not (Test-Path $backupRoot)) {
               Write-Host "❌ Backup directory was not created." -ForegroundColor Red
               exit 1
@@ -1337,7 +1331,6 @@ jobs:
               Start-Sleep -Milliseconds 300
           }
 
-          # Stop remaining PowerShell jobs.
           Get-Job |
               Stop-Job `
                 -PassThru `
