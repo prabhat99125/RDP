@@ -14,6 +14,10 @@ on:
           - "3h"
           - "5h40m"
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   Premium-RDP-Setup:
     runs-on: windows-latest
@@ -35,7 +39,16 @@ jobs:
           Write-Host "==============================================" -ForegroundColor Cyan
           Write-Host ""
 
-          $frames = @('⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷')
+          $frames = @(
+              '⣾',
+              '⣽',
+              '⣻',
+              '⢿',
+              '⡿',
+              '⣟',
+              '⣯',
+              '⣷'
+          )
 
           for ($i = 0; $i -lt 10; $i++) {
               Write-Host "`r🚀 Initializing system... $($frames[$i % 8])" -NoNewline -ForegroundColor Blue
@@ -110,6 +123,8 @@ jobs:
                         protocol=TCP `
                         localport=3389 `
                         profile=any
+
+                      $global:LASTEXITCODE = 0
                   }
               },
 
@@ -133,6 +148,8 @@ jobs:
                       Start-Service `
                         -Name UmRdpService `
                         -ErrorAction SilentlyContinue
+
+                      $global:LASTEXITCODE = 0
                   }
               }
           )
@@ -185,7 +202,10 @@ jobs:
                   $password += $all[(Get-Random -Minimum 0 -Maximum $all.Length)]
               }
 
-              return -join ($password.ToCharArray() | Sort-Object { Get-Random })
+              return -join (
+                  $password.ToCharArray() |
+                  Sort-Object { Get-Random }
+              )
           }
 
           if ($env:CUSTOM_RDP_PASS) {
@@ -197,11 +217,15 @@ jobs:
               Write-Host "│ ℹ️ Generated a random RDP password." -ForegroundColor Blue
           }
 
+          # Mask password in GitHub Actions logs.
+          Write-Output "::add-mask::$password"
+
           $securePassword = ConvertTo-SecureString `
             $password `
             -AsPlainText `
             -Force
 
+          # Remove previous local account.
           try {
               Remove-LocalUser `
                 -Name "AISTV-PREMIUM" `
@@ -249,8 +273,15 @@ jobs:
               exit 1
           }
 
-          "RDP_USER=AISTV-PREMIUM" >> $env:GITHUB_ENV
-          "RDP_PASS=$password" >> $env:GITHUB_ENV
+          "RDP_USER=AISTV-PREMIUM" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Append `
+            -Encoding utf8
+
+          "RDP_PASS=$password" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Append `
+            -Encoding utf8
 
           $password | Out-File `
             -FilePath "$env:TEMP\rdp_password.txt" `
@@ -326,10 +357,18 @@ jobs:
                     -Headers $headers `
                     -OutFile $archive
 
+                  if (-not (Test-Path $archive)) {
+                      throw "Artifact archive was not downloaded."
+                  }
+
                   Expand-Archive `
                     -Path $archive `
                     -DestinationPath $root `
                     -Force
+
+                  # ------------------------------------------------
+                  # RESTORE DESKTOP / DOCUMENTS / DOWNLOADS
+                  # ------------------------------------------------
 
                   foreach ($folder in @(
                       "Desktop",
@@ -358,11 +397,27 @@ jobs:
                             /NDL `
                             /NP | Out-Null
 
-                          Write-Host "✅ Restored: $folder" -ForegroundColor Green
+                          $copyCode = $LASTEXITCODE
+
+                          if ($copyCode -le 7) {
+                              Write-Host "✅ Restored: $folder" -ForegroundColor Green
+                          }
+                          else {
+                              Write-Host "⚠️ Restore warning: $folder (robocopy code $copyCode)" -ForegroundColor Yellow
+                          }
+
+                          $global:LASTEXITCODE = 0
                       }
                   }
 
-                  $chromeSource = Join-Path $root "Chrome\User Data"
+                  # ------------------------------------------------
+                  # RESTORE CHROME
+                  # ------------------------------------------------
+
+                  $chromeSource = Join-Path `
+                    $root `
+                    "Chrome\User Data"
+
                   $chromeTarget = Join-Path `
                     $userHome `
                     "AppData\Local\Google\Chrome\User Data"
@@ -385,9 +440,23 @@ jobs:
                         /NDL `
                         /NP | Out-Null
 
-                      Write-Host "✅ Restored: Chrome profile." -ForegroundColor Green
+                      $copyCode = $LASTEXITCODE
+
+                      if ($copyCode -le 7) {
+                          Write-Host "✅ Restored: Chrome profile." -ForegroundColor Green
+                      }
+                      else {
+                          Write-Host "⚠️ Chrome restore warning. Code: $copyCode" -ForegroundColor Yellow
+                      }
+
                       Write-Host "⚠️ Chrome login sessions may not survive on a new runner." -ForegroundColor Yellow
+
+                      $global:LASTEXITCODE = 0
                   }
+
+                  # ------------------------------------------------
+                  # RESTORE APPDATA\ROAMING
+                  # ------------------------------------------------
 
                   $appDataSource = Join-Path `
                     $root `
@@ -415,8 +484,21 @@ jobs:
                         /NDL `
                         /NP | Out-Null
 
-                      Write-Host "✅ Restored: AppData\Roaming." -ForegroundColor Green
+                      $copyCode = $LASTEXITCODE
+
+                      if ($copyCode -le 7) {
+                          Write-Host "✅ Restored: AppData\Roaming." -ForegroundColor Green
+                      }
+                      else {
+                          Write-Host "⚠️ AppData restore warning. Code: $copyCode" -ForegroundColor Yellow
+                      }
+
+                      $global:LASTEXITCODE = 0
                   }
+
+                  # ------------------------------------------------
+                  # RESTORE .ANDROID
+                  # ------------------------------------------------
 
                   $androidSource = Join-Path `
                     $root `
@@ -444,7 +526,16 @@ jobs:
                         /NDL `
                         /NP | Out-Null
 
-                      Write-Host "✅ Restored: .android." -ForegroundColor Green
+                      $copyCode = $LASTEXITCODE
+
+                      if ($copyCode -le 7) {
+                          Write-Host "✅ Restored: .android" -ForegroundColor Green
+                      }
+                      else {
+                          Write-Host "⚠️ .android restore warning. Code: $copyCode" -ForegroundColor Yellow
+                      }
+
+                      $global:LASTEXITCODE = 0
                   }
 
               }
@@ -458,8 +549,12 @@ jobs:
           catch {
 
               Write-Host "⚠️ Restore failed: $($_.Exception.Message)" -ForegroundColor Yellow
-              Write-Host "➡️ Continuing with a fresh session." -ForegroundColor Yellow
+              Write-Host "➡️ Continuing with a fresh RDP session." -ForegroundColor Yellow
           }
+
+          # --------------------------------------------------------
+          # CLEAN TEMPORARY RESTORE FILES
+          # --------------------------------------------------------
 
           Remove-Item `
             $archive `
@@ -472,9 +567,17 @@ jobs:
             -Force `
             -ErrorAction SilentlyContinue
 
+          # IMPORTANT:
+          # Make sure robocopy/native command status does not
+          # cause GitHub Actions to report this step as failed.
+
+          $global:LASTEXITCODE = 0
+
           Write-Host ""
-          Write-Host "🎯 Restore process completed." -ForegroundColor Green
+          Write-Host "🎯 Restore process completed successfully." -ForegroundColor Green
           Write-Host ""
+
+          exit 0
 
 
       # ============================================================
@@ -516,7 +619,7 @@ jobs:
               Write-Host "│ ✅ Administrator access confirmed." -ForegroundColor Green
           }
           else {
-              Write-Host "│ ❌ Administrator access not found." -ForegroundColor Red
+              Write-Host "│ ⚠️ Administrator access not found." -ForegroundColor Yellow
           }
 
           $isRDPUser = (
@@ -532,18 +635,19 @@ jobs:
               Write-Host "│ ✅ Remote Desktop access confirmed." -ForegroundColor Green
           }
           else {
-              Write-Host "│ ❌ Remote Desktop access not found." -ForegroundColor Red
+              Write-Host "│ ⚠️ Remote Desktop access not found." -ForegroundColor Yellow
           }
 
           $termService = Get-Service `
             -Name TermService `
             -ErrorAction SilentlyContinue
 
-          if ($termService.Status -eq "Running") {
+          if ($termService -and $termService.Status -eq "Running") {
               Write-Host "│ ✅ TermService is running." -ForegroundColor Green
           }
           else {
               Write-Host "│ ❌ TermService is not running." -ForegroundColor Red
+              exit 1
           }
 
           Write-Host ""
@@ -581,7 +685,11 @@ jobs:
 
               Start-Process `
                 msiexec.exe `
-                -ArgumentList "/i", "`"$msiPath`"", "/quiet", "/norestart" `
+                -ArgumentList `
+                  "/i",
+                  "`"$msiPath`"",
+                  "/quiet",
+                  "/norestart" `
                 -Wait
 
               Remove-Item `
@@ -593,6 +701,7 @@ jobs:
           }
           catch {
               Write-Host "│ ❌ Tailscale installation failed." -ForegroundColor Red
+              Write-Host "│ $($_.Exception.Message)" -ForegroundColor Red
               exit 1
           }
 
@@ -622,6 +731,7 @@ jobs:
           }
           catch {
               Write-Host "│ ❌ Failed to connect to Tailscale." -ForegroundColor Red
+              Write-Host "│ $($_.Exception.Message)" -ForegroundColor Red
               exit 1
           }
 
@@ -640,7 +750,10 @@ jobs:
 
                       $ip = $candidate
 
-                      "TAILSCALE_IP=$ip" >> $env:GITHUB_ENV
+                      "TAILSCALE_IP=$ip" | Out-File `
+                        -FilePath $env:GITHUB_ENV `
+                        -Append `
+                        -Encoding utf8
 
                       Write-Host "✅ Tailscale IPv4: $ip" -ForegroundColor Green
 
@@ -656,7 +769,6 @@ jobs:
           }
 
           if (-not $ip) {
-
               Write-Host "❌ Could not obtain a Tailscale IPv4 address." -ForegroundColor Red
               exit 1
           }
@@ -722,7 +834,7 @@ jobs:
 
           Write-Host ""
           Write-Host "============================================================" -ForegroundColor Cyan
-          Write-Host "                 🎉 RDP READY!" -ForegroundColor Green
+          Write-Host "                    🎉 RDP READY!" -ForegroundColor Green
           Write-Host "============================================================" -ForegroundColor Cyan
           Write-Host ""
           Write-Host "🌐 Tailscale IP : $env:TAILSCALE_IP" -ForegroundColor White
@@ -754,7 +866,10 @@ jobs:
           Write-Host ""
           Write-Host "============================================================" -ForegroundColor Cyan
 
-          "TOTAL_MINUTES=$totalMinutes" >> $env:GITHUB_ENV
+          "TOTAL_MINUTES=$totalMinutes" | Out-File `
+            -FilePath $env:GITHUB_ENV `
+            -Append `
+            -Encoding utf8
 
           Write-Host ""
 
@@ -798,7 +913,9 @@ jobs:
 
                   $currentTime = Get-Date
 
-                  if (($currentTime - $lastLogTime).TotalMinutes -ge 2) {
+                  if (
+                      ($currentTime - $lastLogTime).TotalMinutes -ge 2
+                  ) {
 
                       $termService = Get-Service `
                         -Name TermService `
@@ -811,8 +928,15 @@ jobs:
                             $_.State -eq "Established"
                         }
 
+                      $connectionCount = if ($connections) {
+                          @($connections).Count
+                      }
+                      else {
+                          0
+                      }
+
                       Write-Host `
-                        "[$($currentTime.ToString('HH:mm:ss'))] RDP: $($termService.Status) | Connections: $($connections.Count)" `
+                        "[$($currentTime.ToString('HH:mm:ss'))] RDP: $($termService.Status) | Connections: $connectionCount" `
                         -ForegroundColor Blue
 
                       $lastLogTime = $currentTime
@@ -822,7 +946,10 @@ jobs:
                     -Name TermService `
                     -ErrorAction SilentlyContinue
 
-                  if ($termService -and $termService.Status -ne "Running") {
+                  if (
+                      $termService -and
+                      $termService.Status -ne "Running"
+                  ) {
 
                       Write-Host `
                         "[$($currentTime.ToString('HH:mm:ss'))] Restarting TermService..." `
@@ -842,8 +969,16 @@ jobs:
             -Name "SystemMonitor" | Out-Null
 
           $frames = @(
-              '⠋','⠙','⠹','⠸','⠼',
-              '⠴','⠦','⠧','⠇','⠏'
+              '⠋',
+              '⠙',
+              '⠹',
+              '⠸',
+              '⠼',
+              '⠴',
+              '⠦',
+              '⠧',
+              '⠇',
+              '⠏'
           )
 
           $startTimer = Get-Date
@@ -872,7 +1007,9 @@ jobs:
                   [math]::Floor($remaining.TotalSeconds % 60)
               )
 
-              $frameIndex = [int]((Get-Date) - $startTimer).TotalSeconds % $frames.Length
+              $frameIndex = (
+                  [int]((Get-Date) - $startTimer).TotalSeconds
+              ) % $frames.Length
 
               $frame = $frames[$frameIndex]
 
@@ -894,19 +1031,30 @@ jobs:
             -Name "SystemMonitor" `
             -ErrorAction SilentlyContinue |
             Stop-Job `
-            -PassThru |
+            -PassThru `
+            -ErrorAction SilentlyContinue |
             Remove-Job `
-            -Force
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $global:LASTEXITCODE = 0
 
 
       # ============================================================
       # PREPARE BACKUP
       # ============================================================
       - name: 📦 PREPARE RDP BACKUP
+        if: always()
         shell: pwsh
         run: |
 
           $backupRoot = "C:\RDP-BACKUP"
+
+          Write-Host ""
+          Write-Host "============================================================" -ForegroundColor Cyan
+          Write-Host "                📦 PREPARING RDP BACKUP" -ForegroundColor Yellow
+          Write-Host "============================================================" -ForegroundColor Cyan
+          Write-Host ""
 
           if (Test-Path $backupRoot) {
               Remove-Item `
@@ -929,7 +1077,7 @@ jobs:
               )
 
               if (-not (Test-Path $Source)) {
-                  Write-Host "⚠️ Skipped: $Name (source folder not found)"
+                  Write-Host "⚠️ Skipped: $Name (source folder not found)" -ForegroundColor Yellow
                   return
               }
 
@@ -947,49 +1095,99 @@ jobs:
                 /XJ `
                 /NFL `
                 /NDL `
-                /NP
+                /NP | Out-Null
 
               $code = $LASTEXITCODE
 
               if ($code -le 7) {
-                  Write-Host "✅ Backed up: $Name"
+                  Write-Host "✅ Backed up: $Name" -ForegroundColor Green
               }
               else {
-                  Write-Host "⚠️ Backup warning: $Name (robocopy exit code $code)"
+                  Write-Host "⚠️ Backup warning: $Name (robocopy exit code $code)" -ForegroundColor Yellow
               }
 
               $global:LASTEXITCODE = 0
           }
+
+          # --------------------------------------------------------
+          # DESKTOP
+          # --------------------------------------------------------
 
           Backup-Folder `
             "$env:USERPROFILE\Desktop" `
             "$backupRoot\Desktop" `
             "Desktop"
 
+          # --------------------------------------------------------
+          # DOCUMENTS
+          # --------------------------------------------------------
+
           Backup-Folder `
             "$env:USERPROFILE\Documents" `
             "$backupRoot\Documents" `
             "Documents"
+
+          # --------------------------------------------------------
+          # DOWNLOADS
+          # --------------------------------------------------------
 
           Backup-Folder `
             "$env:USERPROFILE\Downloads" `
             "$backupRoot\Downloads" `
             "Downloads"
 
+          # --------------------------------------------------------
+          # CHROME
+          # --------------------------------------------------------
+
           Backup-Folder `
             "$env:LOCALAPPDATA\Google\Chrome\User Data" `
             "$backupRoot\Chrome\User Data" `
             "Chrome User Data"
+
+          # --------------------------------------------------------
+          # APPDATA ROAMING
+          # --------------------------------------------------------
 
           Backup-Folder `
             "$env:APPDATA" `
             "$backupRoot\AppData\Roaming" `
             "AppData\Roaming"
 
-          Write-Host ""
-          Write-Host "📦 Backup preparation completed."
-          Write-Host "📁 Backup location: $backupRoot"
+          # --------------------------------------------------------
+          # ANDROID CONFIG
+          # --------------------------------------------------------
 
+          Backup-Folder `
+            "$env:USERPROFILE\.android" `
+            "$backupRoot\.android" `
+            ".android"
+
+          Write-Host ""
+          Write-Host "📦 Backup preparation completed." -ForegroundColor Green
+          Write-Host "📁 Backup location: $backupRoot" -ForegroundColor Cyan
+          Write-Host ""
+
+          # Verify backup directory.
+          if (-not (Test-Path $backupRoot)) {
+              Write-Host "❌ Backup directory was not created." -ForegroundColor Red
+              exit 1
+          }
+
+          $items = Get-ChildItem `
+            -Path $backupRoot `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          if (-not $items) {
+              Write-Host "⚠️ Backup directory is empty." -ForegroundColor Yellow
+          }
+          else {
+              Write-Host "✅ Backup contains $(@($items).Count) items." -ForegroundColor Green
+          }
+
+          $global:LASTEXITCODE = 0
           exit 0
 
 
@@ -1055,9 +1253,7 @@ jobs:
                             --accept-risk=all `
                             2>$null
 
-                          if ($LASTEXITCODE -ne 0) {
-                              Write-Host "Tailscale was already disconnected." -ForegroundColor Yellow
-                          }
+                          $global:LASTEXITCODE = 0
                       }
                   }
               },
@@ -1083,6 +1279,8 @@ jobs:
                       Remove-NetFirewallRule `
                         -DisplayName "RDP-Premium-Out" `
                         -ErrorAction SilentlyContinue
+
+                      $global:LASTEXITCODE = 0
                   }
               },
 
@@ -1108,6 +1306,8 @@ jobs:
                         -Name TermService `
                         -Force `
                         -ErrorAction SilentlyContinue
+
+                      $global:LASTEXITCODE = 0
                   }
               }
           )
@@ -1137,6 +1337,7 @@ jobs:
               Start-Sleep -Milliseconds 300
           }
 
+          # Stop remaining PowerShell jobs.
           Get-Job |
               Stop-Job `
                 -PassThru `
@@ -1149,3 +1350,6 @@ jobs:
           Write-Host "🎉 Cleanup completed successfully." -ForegroundColor Green
           Write-Host "👋 RDP session has ended." -ForegroundColor Cyan
           Write-Host ""
+
+          $global:LASTEXITCODE = 0
+          exit 0
