@@ -43,7 +43,7 @@ jobs:
           }
 
           Write-Host "`r✅ System initialization completed.          " -ForegroundColor Green
-          Write-Host ""
+          Write-Host "AI STV PREMIUM RDP"
 
 
       # ============================================================
