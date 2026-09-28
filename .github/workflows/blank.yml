@@ -31,7 +31,7 @@ jobs:
           Write-Host "==============================================" -ForegroundColor Cyan
           Write-Host "        🤖 AI STV PREMIUM RDP SERVER" -ForegroundColor Yellow
           Write-Host "        ⚡ Powered by AI STV" -ForegroundColor Green
-          Write-Host "        🕒 Duration: ${{ github.event.inputs.duration }}" -ForegroundColor Magenta
+          Write-Host "        🕒 Duration: ${{ inputs.duration }}" -ForegroundColor Magenta
           Write-Host "==============================================" -ForegroundColor Cyan
           Write-Host ""
 
@@ -202,7 +202,6 @@ jobs:
             -AsPlainText `
             -Force
 
-          # Remove old account if it exists
           try {
               Remove-LocalUser `
                 -Name "AISTV-PREMIUM" `
@@ -214,7 +213,6 @@ jobs:
               Write-Host "│ ℹ️ No previous RDP account found." -ForegroundColor Blue
           }
 
-          # Create account
           try {
 
               New-LocalUser `
@@ -225,22 +223,16 @@ jobs:
 
               Write-Host "│ ✅ RDP account created." -ForegroundColor Green
 
-              try {
-                  Set-LocalUser `
-                    -Name "AISTV-PREMIUM" `
-                    -PasswordNeverExpires $true `
-                    -ErrorAction SilentlyContinue
-              }
-              catch {
-              }
+              Set-LocalUser `
+                -Name "AISTV-PREMIUM" `
+                -PasswordNeverExpires $true `
+                -ErrorAction SilentlyContinue
 
-              # Administrator
               Add-LocalGroupMember `
                 -Group "Administrators" `
                 -Member "AISTV-PREMIUM" `
                 -ErrorAction SilentlyContinue
 
-              # Remote Desktop Users
               Add-LocalGroupMember `
                 -Group "Remote Desktop Users" `
                 -Member "AISTV-PREMIUM" `
@@ -339,7 +331,6 @@ jobs:
                     -DestinationPath $root `
                     -Force
 
-                  # Restore Desktop/Documents/Downloads
                   foreach ($folder in @(
                       "Desktop",
                       "Documents",
@@ -371,7 +362,6 @@ jobs:
                       }
                   }
 
-                  # Restore Chrome
                   $chromeSource = Join-Path $root "Chrome\User Data"
                   $chromeTarget = Join-Path `
                     $userHome `
@@ -399,7 +389,6 @@ jobs:
                       Write-Host "⚠️ Chrome login sessions may not survive on a new runner." -ForegroundColor Yellow
                   }
 
-                  # Restore AppData\Roaming
                   $appDataSource = Join-Path `
                     $root `
                     "AppData\Roaming"
@@ -429,7 +418,6 @@ jobs:
                       Write-Host "✅ Restored: AppData\Roaming." -ForegroundColor Green
                   }
 
-                  # Restore Android configuration
                   $androidSource = Join-Path `
                     $root `
                     ".android"
@@ -578,6 +566,11 @@ jobs:
           Write-Host "==============================================" -ForegroundColor Cyan
           Write-Host ""
 
+          if (-not $env:TAILSCALE_AUTH_KEY) {
+              Write-Host "❌ TAILSCALE_AUTH_KEY secret is missing." -ForegroundColor Red
+              exit 1
+          }
+
           try {
 
               $msiPath = "$env:TEMP\tailscale-premium.msi"
@@ -615,8 +608,8 @@ jobs:
           try {
 
               & $tailscale up `
-                --authkey=$env:TAILSCALE_AUTH_KEY `
-                --hostname=ai-stv-premium-$env:GITHUB_RUN_ID `
+                "--authkey=$env:TAILSCALE_AUTH_KEY" `
+                "--hostname=ai-stv-premium-$env:GITHUB_RUN_ID" `
                 --accept-routes `
                 --accept-dns `
                 --reset
@@ -686,10 +679,10 @@ jobs:
               $password = "Unavailable"
           }
 
-          $durationInput = "${{ github.event.inputs.duration }}"
+          $durationInput = "${{ inputs.duration }}"
 
           switch ($durationInput) {
-          
+
               "20m" {
                   $totalMinutes = 20
                   $displayTime = "20 minutes"
@@ -797,7 +790,6 @@ jobs:
           Write-Host "🕐 Ends    : $($endTime.ToString('HH:mm:ss'))" -ForegroundColor Green
           Write-Host ""
 
-          # Background RDP monitor
           $monitorScript = {
 
               $lastLogTime = Get-Date
@@ -806,9 +798,7 @@ jobs:
 
                   $currentTime = Get-Date
 
-                  if (
-                      ($currentTime - $lastLogTime).TotalMinutes -ge 2
-                  ) {
+                  if (($currentTime - $lastLogTime).TotalMinutes -ge 2) {
 
                       $termService = Get-Service `
                         -Name TermService `
@@ -832,10 +822,7 @@ jobs:
                     -Name TermService `
                     -ErrorAction SilentlyContinue
 
-                  if (
-                      $termService -and
-                      $termService.Status -ne "Running"
-                  ) {
+                  if ($termService -and $termService.Status -ne "Running") {
 
                       Write-Host `
                         "[$($currentTime.ToString('HH:mm:ss'))] Restarting TermService..." `
@@ -885,9 +872,7 @@ jobs:
                   [math]::Floor($remaining.TotalSeconds % 60)
               )
 
-              $frameIndex = (
-                  [int]((Get-Date) - $startTimer).TotalSeconds
-              ) % $frames.Length
+              $frameIndex = [int]((Get-Date) - $startTimer).TotalSeconds % $frames.Length
 
               $frame = $frames[$frameIndex]
 
@@ -917,76 +902,95 @@ jobs:
       # ============================================================
       # PREPARE BACKUP
       # ============================================================
-     - name: Prepare RDP Backup
-  shell: pwsh
-  run: |
-    $backupRoot = "C:\RDP-BACKUP"
+      - name: 📦 PREPARE RDP BACKUP
+        shell: pwsh
+        run: |
 
-    if (Test-Path $backupRoot) {
-      Remove-Item $backupRoot -Recurse -Force -ErrorAction SilentlyContinue
-    }
+          $backupRoot = "C:\RDP-BACKUP"
 
-    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+          if (Test-Path $backupRoot) {
+              Remove-Item `
+                $backupRoot `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue
+          }
 
-    function Backup-Folder {
-      param (
-        [string]$Source,
-        [string]$Destination,
-        [string]$Name
-      )
+          New-Item `
+            -ItemType Directory `
+            -Path $backupRoot `
+            -Force | Out-Null
 
-      if (-not (Test-Path $Source)) {
-        Write-Host "⚠️ Skipped: $Name (source folder not found)"
-        return
-      }
+          function Backup-Folder {
+              param (
+                  [string]$Source,
+                  [string]$Destination,
+                  [string]$Name
+              )
 
-      New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+              if (-not (Test-Path $Source)) {
+                  Write-Host "⚠️ Skipped: $Name (source folder not found)"
+                  return
+              }
 
-      robocopy $Source $Destination /E /R:1 /W:1 /XJ /NFL /NDL /NP
+              New-Item `
+                -ItemType Directory `
+                -Path $Destination `
+                -Force | Out-Null
 
-      $code = $LASTEXITCODE
+              robocopy `
+                $Source `
+                $Destination `
+                /E `
+                /R:1 `
+                /W:1 `
+                /XJ `
+                /NFL `
+                /NDL `
+                /NP
 
-      if ($code -le 7) {
-        Write-Host "✅ Backed up: $Name"
-      }
-      else {
-        Write-Host "⚠️ Backup warning: $Name (robocopy exit code $code)"
-      }
+              $code = $LASTEXITCODE
 
-      # Prevent robocopy's normal exit codes from failing GitHub Actions
-      $global:LASTEXITCODE = 0
-    }
+              if ($code -le 7) {
+                  Write-Host "✅ Backed up: $Name"
+              }
+              else {
+                  Write-Host "⚠️ Backup warning: $Name (robocopy exit code $code)"
+              }
 
-    Backup-Folder `
-      "$env:USERPROFILE\Desktop" `
-      "$backupRoot\Desktop" `
-      "Desktop"
+              $global:LASTEXITCODE = 0
+          }
 
-    Backup-Folder `
-      "$env:USERPROFILE\Documents" `
-      "$backupRoot\Documents" `
-      "Documents"
+          Backup-Folder `
+            "$env:USERPROFILE\Desktop" `
+            "$backupRoot\Desktop" `
+            "Desktop"
 
-    Backup-Folder `
-      "$env:USERPROFILE\Downloads" `
-      "$backupRoot\Downloads" `
-      "Downloads"
+          Backup-Folder `
+            "$env:USERPROFILE\Documents" `
+            "$backupRoot\Documents" `
+            "Documents"
 
-    Backup-Folder `
-      "$env:LOCALAPPDATA\Google\Chrome\User Data" `
-      "$backupRoot\Chrome\User Data" `
-      "Chrome User Data"
+          Backup-Folder `
+            "$env:USERPROFILE\Downloads" `
+            "$backupRoot\Downloads" `
+            "Downloads"
 
-    Backup-Folder `
-      "$env:APPDATA" `
-      "$backupRoot\AppData\Roaming" `
-      "AppData\Roaming"
+          Backup-Folder `
+            "$env:LOCALAPPDATA\Google\Chrome\User Data" `
+            "$backupRoot\Chrome\User Data" `
+            "Chrome User Data"
 
-    Write-Host ""
-    Write-Host "📦 Backup preparation completed."
-    Write-Host "📁 Backup location: $backupRoot"
+          Backup-Folder `
+            "$env:APPDATA" `
+            "$backupRoot\AppData\Roaming" `
+            "AppData\Roaming"
 
-    exit 0
+          Write-Host ""
+          Write-Host "📦 Backup preparation completed."
+          Write-Host "📁 Backup location: $backupRoot"
+
+          exit 0
 
 
       # ============================================================
@@ -1133,7 +1137,6 @@ jobs:
               Start-Sleep -Milliseconds 300
           }
 
-          # Stop remaining PowerShell jobs
           Get-Job |
               Stop-Job `
                 -PassThru `
