@@ -689,6 +689,11 @@ jobs:
           $durationInput = "${{ github.event.inputs.duration }}"
 
           switch ($durationInput) {
+          
+              "20m" {
+                  $totalMinutes = 20
+                  $displayTime = "20 minutes"
+              }
 
               "1h" {
                   $totalMinutes = 60
@@ -912,169 +917,76 @@ jobs:
       # ============================================================
       # PREPARE BACKUP
       # ============================================================
-      - name: 📦 PREPARE RDP BACKUP
-        if: always()
-        shell: pwsh
-        run: |
+     - name: Prepare RDP Backup
+  shell: pwsh
+  run: |
+    $backupRoot = "C:\RDP-BACKUP"
 
-          $backup = "C:\RDP-BACKUP"
-          $userHome = "C:\Users\AISTV-PREMIUM"
+    if (Test-Path $backupRoot) {
+      Remove-Item $backupRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
-          Write-Host ""
-          Write-Host "============================================================" -ForegroundColor Cyan
-          Write-Host "              📦 PREPARING RDP BACKUP" -ForegroundColor Yellow
-          Write-Host "============================================================" -ForegroundColor Cyan
-          Write-Host ""
+    New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
 
-          Remove-Item `
-            $backup `
-            -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue
+    function Backup-Folder {
+      param (
+        [string]$Source,
+        [string]$Destination,
+        [string]$Name
+      )
 
-          New-Item `
-            -ItemType Directory `
-            -Path $backup `
-            -Force | Out-Null
+      if (-not (Test-Path $Source)) {
+        Write-Host "⚠️ Skipped: $Name (source folder not found)"
+        return
+      }
 
-          # IMPORTANT:
-          # We intentionally do NOT upload the entire user profile.
-          # Windows contains protected/junction folders such as
-          # "My Music", "My Pictures", etc.
-          #
-          # /XJ prevents robocopy from following junction points.
+      New-Item -ItemType Directory -Path $Destination -Force | Out-Null
 
-          $folders = @(
-              "Desktop",
-              "Documents",
-              "Downloads"
-          )
+      robocopy $Source $Destination /E /R:1 /W:1 /XJ /NFL /NDL /NP
 
-          foreach ($folder in $folders) {
+      $code = $LASTEXITCODE
 
-              $source = Join-Path $userHome $folder
-              $target = Join-Path $backup $folder
+      if ($code -le 7) {
+        Write-Host "✅ Backed up: $Name"
+      }
+      else {
+        Write-Host "⚠️ Backup warning: $Name (robocopy exit code $code)"
+      }
 
-              if (Test-Path -LiteralPath $source) {
+      # Prevent robocopy's normal exit codes from failing GitHub Actions
+      $global:LASTEXITCODE = 0
+    }
 
-                  New-Item `
-                    -ItemType Directory `
-                    -Path $target `
-                    -Force | Out-Null
+    Backup-Folder `
+      "$env:USERPROFILE\Desktop" `
+      "$backupRoot\Desktop" `
+      "Desktop"
 
-                  robocopy `
-                    $source `
-                    $target `
-                    /E `
-                    /R:1 `
-                    /W:1 `
-                    /XJ `
-                    /NFL `
-                    /NDL `
-                    /NP | Out-Null
+    Backup-Folder `
+      "$env:USERPROFILE\Documents" `
+      "$backupRoot\Documents" `
+      "Documents"
 
-                  Write-Host "✅ Backed up: $folder" -ForegroundColor Green
-              }
-              else {
+    Backup-Folder `
+      "$env:USERPROFILE\Downloads" `
+      "$backupRoot\Downloads" `
+      "Downloads"
 
-                  Write-Host "ℹ️ Folder not found: $folder" -ForegroundColor Cyan
-              }
-          }
+    Backup-Folder `
+      "$env:LOCALAPPDATA\Google\Chrome\User Data" `
+      "$backupRoot\Chrome\User Data" `
+      "Chrome User Data"
 
-          # Chrome
-          $chromeSource = Join-Path `
-            $userHome `
-            "AppData\Local\Google\Chrome\User Data"
+    Backup-Folder `
+      "$env:APPDATA" `
+      "$backupRoot\AppData\Roaming" `
+      "AppData\Roaming"
 
-          $chromeTarget = Join-Path `
-            $backup `
-            "Chrome\User Data"
+    Write-Host ""
+    Write-Host "📦 Backup preparation completed."
+    Write-Host "📁 Backup location: $backupRoot"
 
-          if (Test-Path -LiteralPath $chromeSource) {
-
-              New-Item `
-                -ItemType Directory `
-                -Path $chromeTarget `
-                -Force | Out-Null
-
-              robocopy `
-                $chromeSource `
-                $chromeTarget `
-                /E `
-                /R:1 `
-                /W:1 `
-                /XJ `
-                /NFL `
-                /NDL `
-                /NP | Out-Null
-
-              Write-Host "✅ Backed up: Chrome User Data" -ForegroundColor Green
-          }
-
-          # AppData\Roaming
-          $roamingSource = Join-Path `
-            $userHome `
-            "AppData\Roaming"
-
-          $roamingTarget = Join-Path `
-            $backup `
-            "AppData\Roaming"
-
-          if (Test-Path -LiteralPath $roamingSource) {
-
-              New-Item `
-                -ItemType Directory `
-                -Path $roamingTarget `
-                -Force | Out-Null
-
-              robocopy `
-                $roamingSource `
-                $roamingTarget `
-                /E `
-                /R:1 `
-                /W:1 `
-                /XJ `
-                /NFL `
-                /NDL `
-                /NP | Out-Null
-
-              Write-Host "✅ Backed up: AppData\Roaming" -ForegroundColor Green
-          }
-
-          # Android
-          $androidSource = Join-Path `
-            $userHome `
-            ".android"
-
-          $androidTarget = Join-Path `
-            $backup `
-            ".android"
-
-          if (Test-Path -LiteralPath $androidSource) {
-
-              New-Item `
-                -ItemType Directory `
-                -Path $androidTarget `
-                -Force | Out-Null
-
-              robocopy `
-                $androidSource `
-                $androidTarget `
-                /E `
-                /R:1 `
-                /W:1 `
-                /XJ `
-                /NFL `
-                /NDL `
-                /NP | Out-Null
-
-              Write-Host "✅ Backed up: .android" -ForegroundColor Green
-          }
-
-          Write-Host ""
-          Write-Host "📦 Backup preparation completed." -ForegroundColor Green
-          Write-Host "📁 Backup location: $backup" -ForegroundColor Cyan
-          Write-Host ""
+    exit 0
 
 
       # ============================================================
